@@ -99,6 +99,7 @@ class Boid(Rectangle):
 
         self.local_group = pygame.sprite.Group()
         self.hoik_group = pygame.sprite.Group()
+        self.obstacle_group = pygame.sprite.Group()
         self.MAX_SPEED = 2.0
         self.MIN_SPEED = 1.0
 
@@ -109,31 +110,39 @@ class Boid(Rectangle):
         check if object is in proximity.
         If true, find out if object is boid or hoik and add to a group.
         '''
-        x_dist = abs(self.rect.centerx - other.rect.centerx) #find dist along x-axis from centers
-        if x_dist < self.width/2 + self.proximity:
-            if other.__class__.__name__ == "Boid":
+        x_dist = abs(self.rect.centerx - other.rect.centerx) #find absolute dist along x-axis from centers
+        y_dist = abs(self.rect.centery - other.rect.centery) #find absolute dist along y-axis from centers
+
+        if other.__class__.__name__ == "Boid":
+            if x_dist < self.width/2 + self.proximity:
                 self.local_group.add(other)
                 return
-            elif other.__class__.__name__ == "Hoik":
-                print("give me the pepper-epper")
-                self.hoik_group.add()
-                return
-            else:
-                print("PAPPER")
-
-        y_dist = abs(self.rect.centery - other.rect.centery) #find dist along y-axis from centers
-        if y_dist < self.height/2 + self.proximity:
-            if other.__class__.__name__ == "Boid":
+            if y_dist < self.height/2 + self.proximity:
                 self.local_group.add(other)
                 return
-            if other.__class__.__name__ == "Hoik":
-                print("NO! i don't want that")
-                self.hoik_group.add()
+
+        if other.__class__.__name__ == "Hoik":
+            if x_dist < self.width/2 + self.proximity:
+                self.hoik_group.add(other)
                 return
-        return
+
+            if y_dist < self.height/2 + self.proximity:
+                self.hoik_group.add(other)
+                return
+
+        if other.__class__.__name__ == "Obstacle":
+            if x_dist <= self.width/2 + other.width/2 + 1:
+                self.obstacle_group.add(other)
+                return
+
+            if y_dist <= self.height/2 + other.height/2 + 1:
+                self.obstacle_group.add(other)
+                return
+        else:
+            return
 
 
-    def local_center(self):
+    def local_boid_center(self):
         '''
         Find average center of boids in local group, return tuple.
         '''
@@ -151,7 +160,7 @@ class Boid(Rectangle):
         return avg_x, avg_y
 
 
-    def local_velocity(self):
+    def local_boid_vel(self):
         '''
         Find average velocity of boids in local group, return float.
         '''
@@ -168,7 +177,7 @@ class Boid(Rectangle):
         return newvelocity
 
 
-    def local_direction(self):
+    def local_boid_dir(self):
         '''Return angle in degrees pointing towards average direction of local boids.'''
         if len(self.local_group.sprites()) == 0:
             return self.angle
@@ -181,7 +190,7 @@ class Boid(Rectangle):
         return newangle
 
 
-    def local_collision(self):
+    def avoid_nearest_boid(self):
         '''Return angle in degrees pointing away from nearest boid.'''
         if len(self.local_group.sprites()) == 0:
             return 0
@@ -209,29 +218,51 @@ class Boid(Rectangle):
         return self.angle
 
 
-    def flee_from_hoik(self):
+    def avoid_nearest_obstacle(self):
+        '''Return angle pointing away from obstacle'''
+        if len(self.obstacle_group.sprites()) == 0:
+            return self.angle
+
+        else:
+            closest_obstacle = pygame.sprite.Group()
+            smallest_h = 100 #extent of local group
+            for obstacle in self.obstacle_group.sprites():
+                x_dist = abs(self.rect.centerx - obstacle.rect.centerx)
+                y_dist = abs(self.rect.centery - obstacle.rect.centery)
+                h = np.sqrt(np.hypot(x_dist,y_dist)) #find hypotenuse defined by dist in x- and y-dir between boids
+                if h < smallest_h:
+                    smallest_h = h
+                    closest_obstacle.empty() #remove previous boid
+                    closest_obstacle.add(obstacle)
+
+
+            target = closest_obstacle.sprites()
+            if len(target) > 0:
+                newangle = - self.PointAngle(target[0].rect.x,target[0].rect.y)
+                return newangle
+                print()
+            return self.angle
+
+
+    def avoid_nearest_hoik(self):
         '''Return angle in degrees pointing away from nearest hoik.'''
         if len(self.hoik_group.sprites()) == 0:
             return self.angle
 
         closest_hoik = pygame.sprite.Group()
-        #smallest_h = self.width/2 + self.proximity
+        smallest_h = self.width/2 + self.proximity
 
         for hoik in self.hoik_group.sprites():
-            closest_hoik.empty()
-            closest_hoik.add(hoik)
-            print(hoik)
-            #x_dist = abs(self.rect.centerx - hoik.rect.centerx)
-            #y_dist = abs(self.rect.centery - hoik.rect.centery)
-            #h = np.sqrt(np.hypot(x_dist,y_dist)) #find hypotenuse defined by dist in x- and y-dir between hoiks
-            #if h < smallest_h:
-            #    smallest_h = h
-            #    closest_hoik.empty() #remove previous hoik
-            #    closest_hoik.add(hoik)
+            x_dist = abs(self.rect.centerx - hoik.rect.centerx)
+            y_dist = abs(self.rect.centery - hoik.rect.centery)
+            h = np.sqrt(np.hypot(x_dist,y_dist)) #find hypotenuse defined by dist in x- and y-dir between hoiks
+            if h < smallest_h:
+                smallest_h = h
+                closest_hoik.empty() #remove previous hoik
+                closest_hoik.add(hoik)
 
         target = closest_hoik.sprites()
         if len(target) > 0:
-            print("YAS")
             newangle = - self.PointAngle(target[0].rect.x,target[0].rect.y)
             return newangle
         else:
@@ -243,18 +274,30 @@ class Boid(Rectangle):
         '''
         Find new angle based on mean of other angles.
         '''
-        center = self.PointAngle(avg_x,avg_y) #angle towards average center of local group
-        dir = self.local_direction()          #average angle of local group
-        col = self.local_collision()          #angle away from closest boid in group
-        flee = self.flee_from_hoik()
+        #avoid_hoik = self.avoid_nearest_hoik()
+        #avoid_obstacle = self.avoid_nearest_obstacle
 
-        newangle = int(((flee) % 359))
-        return newangle
+        if len(self.obstacle_group.sprites()) > 0:
+            newangle = self.avoid_nearest_obstacle()
+            return newangle
+
+        if len(self.hoik_group.sprites()) > 0:
+            newangle = self.avoid_nearest_hoik()
+            return newangle
+
+        else:
+            center = self.PointAngle(avg_x,avg_y)  #angle towards average center of local group
+            dir = self.local_boid_dir()            #average angle of local group
+            avoid_boid = self.avoid_nearest_boid() #angle away from closest boid in group
+
+            newangle = int((dir + avoid_boid*2 + center*10)/4 % 359)
+            return newangle
+        return
 
 
     def new_velocity(self):
         '''this function takes the mean of velocities'''
-        newvelocity = ((self.angle+self.local_velocity())/2)
+        newvelocity = ((self.angle+self.local_boid_vel())/2)
 
         if newvelocity > self.MAX_SPEED:
             newvelocity = self.MAX_SPEED
@@ -268,7 +311,7 @@ class Boid(Rectangle):
         '''
         Calculate new position from velocity and angle/direction.
         '''
-        avg_x, avg_y = self.local_center()
+        avg_x, avg_y = self.local_boid_center()
         self.angle = self.new_angle(avg_x,avg_y)
 
         self.velocity = self.new_velocity()
@@ -279,6 +322,8 @@ class Boid(Rectangle):
 
         #empty local_group here so that hoik can inherit update() without deleting its local_group
         self.local_group.empty()
+        self.obstacle_group.empty()
+        self.hoik_group.empty()
 
 
     def noise(self,a,v):
@@ -299,23 +344,23 @@ class Boid(Rectangle):
 
         self.new_position(5,2)    #calculate new position
         #left wall collide
-        if self.rect.x < 0.0 - self.width:# + 50:
-            self.rect.x = SCREEN_WIDTH + self.width - 1# -50
+        if self.rect.x < 0.0 - self.width + 50:
+            self.rect.x = SCREEN_WIDTH + self.width - 10 -50
             #self.angle = -self.angle
             #self.rect.x = 51
         #right wall collide
-        if self.rect.x > SCREEN_WIDTH + self.width:# - 50:
-            self.rect.x = 0.0 - self.width + 1# + 50
+        if self.rect.x > SCREEN_WIDTH + self.width - 50:
+            self.rect.x = 0.0 - self.width + 10 + 50
             #self.angle= -self.angle
             #self.rect.x = SCREEN_WIDTH - 51
         #roof collide
-        if self.rect.y < 0.0 - self.height:# + 50:
-            self.rect.y = SCREEN_HEIGHT + self.height - 1# - 50
+        if self.rect.y < 0.0 - self.height + 50:
+            self.rect.y = SCREEN_HEIGHT + self.height - 10 - 50
             #self.angle = 180 - self.angle
             #self.rect.y = 51
         #bottom collide
-        if self.rect.y > SCREEN_HEIGHT + self.height:# - 50:
-            self.rect.y = 0.0 - self.height + 1# + 50
+        if self.rect.y > SCREEN_HEIGHT + self.height - 50:
+            self.rect.y = 0.0 - self.height + 10 + 50
             #self.angle = 180 - self.angle
             #self.rect.y = SCREEN_HEIGHT - 50
 
@@ -328,7 +373,6 @@ class Hoik(Boid):
         super().__init__(width,height,x_pos,y_pos,color,angle,velocity,proximity)
         self.MAX_SPEED = 6.0
         self.MIN_SPEED = 1.0
-        self.local_group = pygame.sprite.Group()
 
 
     def new_angle(self):
@@ -339,7 +383,6 @@ class Hoik(Boid):
         if len(self.local_group.sprites()) == 0:
             return self.angle
 
-        #print("This number should be greater than 0: %s" %len(self.local_group.sprites()))
         closest_boid = pygame.sprite.Group()
         closest_boid.empty()
         smallest_h = self.width/2 + self.proximity #extent of local group
@@ -349,19 +392,14 @@ class Hoik(Boid):
             y_dist = abs(self.rect.centery - boid.rect.centery)
             h = np.sqrt(np.hypot(x_dist,y_dist))
             if h < smallest_h:
-                #print("This should be a boid class: %s" %boid)
                 smallest_h = h
                 closest_boid.empty() #remove previous boid
                 closest_boid.add(boid)
-                #print("This number should be 1. %s" %len(closest_boid.sprites()))
-            else:
-                pass
 
         target = closest_boid.sprites()
         if len(target) > 0:
-            #print("this HOIK list should have 1 element: %s" %target)
             newangle = self.PointAngle(target[0].rect.x,target[0].rect.y)
-            target[0].image.fill((255,0,0))
+            target[0].image.fill((255,0,0)) #make the prey stand out.
             return newangle
         else:
             return self.angle
@@ -380,12 +418,9 @@ class Hoik(Boid):
 class Obstacle(Rectangle):
     '''Obstacle object representation, derived from Rectangle class.'''
 
-    def __init__(self,width,height,x_pos,y_pos):
+    def __init__(self,width,height,x_pos,y_pos,color):
         '''Create an Obstacle.'''
-        super().__init__()
-
-    def update():
-        '''Obstacle is static, this function does nothing.'''
+        super().__init__(width,height,x_pos,y_pos,color)
 
 
 class Simulation:
@@ -402,6 +437,7 @@ class Simulation:
         self.clock = pygame.time.Clock()
         self.Boid_Group = pygame.sprite.Group()
         self.Hoik_Group = pygame.sprite.Group()
+        self.Obstacle_Group = pygame.sprite.Group()
         self.all_Sprites = pygame.sprite.Group()
 
 
@@ -417,17 +453,29 @@ class Simulation:
         self.Hoik_Group.add(newhoik)
 
 
-    def play(self):
-        '''begin simulation.'''
+    def add_Obstacle(self,width,height,x_pos,y_pos,color):
+        '''Add an Obstacle to the simulation.'''
+        newobstacle = Obstacle(width,height,x_pos,y_pos,color)
+        self.Obstacle_Group.add(newobstacle)
+
+
+    def play(self,n_boids,n_hoiks,n_obstacles):
+        '''Begin simulation.'''
         key = pygame.key.get_pressed()
 
-        for i in range(100):
-            self.add_Boid(3,3,random.randint(10,self.SCRN_W - 10),random.randint(10,self.SCRN_H - 10),(255,255,255),random.randint(0,359),random.randint(1,2),50)
+        for i in range(n_boids):
+            self.add_Boid(3,3,random.randint(3,self.SCRN_W - 3),random.randint(3,self.SCRN_H - 3),(255,255,255),random.randint(0,359),random.randint(1,2),20)
         self.all_Sprites.add(self.Boid_Group)
 
-        for j in range(1):
-            self.add_Hoik(10,10,random.randint(10,self.SCRN_W - 10),random.randint(10,self.SCRN_H - 10),(255,255,255),random.randint(0,359),3,100)
+        for j in range(n_hoiks):
+            self.add_Hoik(10,10,random.randint(10,self.SCRN_W - 10),random.randint(10,self.SCRN_H - 10),(255,255,255),random.randint(0,359),2,20)
         self.all_Sprites.add(self.Hoik_Group)
+
+        for k in range(n_obstacles):
+            self.add_Obstacle(20,20,random.randint(20,self.SCRN_W - 20),random.randint(20,self.SCRN_H - 20),(255,255,255))
+        self.all_Sprites.add(self.Obstacle_Group)
+
+
         while True: #the simulation loop
 
             for event in pygame.event.get():
@@ -440,9 +488,14 @@ class Simulation:
 
             for boid in self.Boid_Group.sprites():
                 boid.image.fill((255,255,255))
+                for obstacle in self.Obstacle_Group.sprites():
+                    boid.find_local_object(obstacle)
+
                 for hoik in self.Hoik_Group.sprites():
                     boid.find_local_object(hoik)
                     hoik.find_local_object(boid)
+                    for obstacle in self.Obstacle_Group.sprites():
+                        hoik.find_local_object(obstacle)
 
                 for other_boid in self.Boid_Group.sprites():
                     if boid != other_boid:
@@ -459,4 +512,4 @@ class Simulation:
 
 
 sim = Simulation(SCREEN_WIDTH,SCREEN_HEIGHT)
-sim.play()
+sim.play(100,0,0)
