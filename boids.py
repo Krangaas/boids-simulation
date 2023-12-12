@@ -2,7 +2,6 @@
                                 ## INF-1400 ##
                               ##  Magus Kanck ##
                                 ##  mka080  ##
-import sys
 import pygame
 import numpy as np
 import random
